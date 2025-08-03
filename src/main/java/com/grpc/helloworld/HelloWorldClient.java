@@ -54,8 +54,7 @@ public class HelloWorldClient {
         String target = "localhost:50051";
         
         // 创建一个通信通道到服务器，称为Channel。通道是线程安全的
-        // 并且可以重复使用。通常在应用程序开始时创建通道并重复使用
-        // 直到应用程序关闭。
+        // 并且可以重复使用。通常在应用程序开始时创建通道并重复使用直到应用程序关闭。
         ManagedChannel channel = ManagedChannelBuilder.forTarget(target)
                 // 没有TLS的通道。为了在生产环境中使用，TLS应该
                 // 用NettyChannelBuilder或GrpcSslContexts配置。
