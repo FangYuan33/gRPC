@@ -2,6 +2,7 @@ package com.grpc.helloworld;
 
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 
 import java.io.IOException;
@@ -62,19 +63,28 @@ public class HelloWorldServer {
     private static class GreeterImpl extends GreeterGrpc.GreeterImplBase {
         @Override
         public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
-            String name = request.getName();
-            logger.info("收到问候请求，姓名: " + name);
+            try {
+                String name = request.getName();
+                logger.info("收到问候请求，姓名: " + name);
 
-            // 创建响应
-            HelloReply reply = HelloReply.newBuilder()
-                    .setMessage("Hello, " + name + "!")
-                    .build();
+                // 创建响应
+                HelloReply reply = HelloReply.newBuilder()
+                        .setMessage("Hello, " + name + "!")
+                        .build();
 
-            // 发送响应
-            responseObserver.onNext(reply);
-            responseObserver.onCompleted();
+                // 发送一条响应
+                responseObserver.onNext(reply);
+                // 完成响应
+                responseObserver.onCompleted();
 
-            logger.info("已发送问候响应: " + reply.getMessage());
+                logger.info("已发送问候响应: " + reply.getMessage());
+            } catch (Exception e) {
+                // 发送异常响应
+                responseObserver.onError(Status.INTERNAL
+                        .withDescription("服务器内部错误")
+                        .withCause(e)
+                        .asRuntimeException());
+            }
         }
     }
 

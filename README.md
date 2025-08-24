@@ -1,6 +1,6 @@
 ## 深入浅出 gRPC
 
-gRPC 是一个高性能、开源和通用的 RPC 框架，最初由 Google 开发。它使用 HTTP/2 协议作为传输层，并支持多种编程语言。gRPC 允许客户端和服务器之间进行高效的通信，特别适合微服务架构。在 gRPC 中，服务定义是通过 **Protocol Buffers（protobuf）** 来描述的。本篇文章以用 Java 编写 RPC 接口为例，介绍 gRPC 相关的基本概念和使用方法：既可以简单地了解到 gRPC 的使用，也可以深入细节中熟悉更多相关的内容，代码示例参考 [grpc-java-example](https://github.com/FangYuan33/gRPC)。
+gRPC 是一个高性能、开源和通用的 RPC 框架，最初由 Google 开发。它使用 HTTP/2 协议作为传输层，并支持多种编程语言。gRPC 允许客户端和服务器之间进行高效的通信，特别适合微服务架构。在 gRPC 中，服务定义是通过 **Protocol Buffers（protobuf）** 来描述的。本篇文章以用 Java 编写 gRPC 接口为例，介绍 gRPC 相关的基本概念和使用方法：既可以简单地了解到 gRPC 的使用，也可以深入细节中熟悉更多相关的内容，代码示例参考 [grpc-java-example](https://github.com/FangYuan33/gRPC)。
 
 ### protobuf 定义
 
@@ -9,7 +9,9 @@ protobuf 是一种语言无关、平台无关、可扩展的结构化数据序�
 ```protobuf
 syntax = "proto3";
 
+// 为每个消息类型生成单独的 Java 文件，而不是把所有类放在一个外部类中
 option java_multiple_files = true;
+// 执行包路径
 option java_package = "com.grpc.helloworld";
 option java_outer_classname = "HelloWorldProto";
 option objc_class_prefix = "HLW";
@@ -258,24 +260,33 @@ mvn clean compile
     private static class GreeterImpl extends GreeterGrpc.GreeterImplBase {
         @Override
         public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
-            String name = request.getName();
-            logger.info("收到问候请求，姓名: " + name);
+            try {
+                String name = request.getName();
+                logger.info("收到问候请求，姓名: " + name);
 
-            // 创建响应
-            HelloReply reply = HelloReply.newBuilder()
-                    .setMessage("Hello, " + name + "!")
-                    .build();
+                // 创建响应
+                HelloReply reply = HelloReply.newBuilder()
+                        .setMessage("Hello, " + name + "!")
+                        .build();
 
-            // 发送响应
-            responseObserver.onNext(reply);
-            responseObserver.onCompleted();
+                // 发送一条响应
+                responseObserver.onNext(reply);
+                // 完成响应
+                responseObserver.onCompleted();
 
-            logger.info("已发送问候响应: " + reply.getMessage());
+                logger.info("已发送问候响应: " + reply.getMessage());
+            } catch (Exception e) {
+                // 发送异常响应
+                responseObserver.onError(Status.INTERNAL
+                        .withDescription("服务器内部错误")
+                        .withCause(e)
+                        .asRuntimeException());
+            }
         }
     }
 ```
 
-接口业务逻辑实现完成后，服务端需要启动 gRPC 服务器来监听客户端请求。我们可以使用 `ServerBuilder` 来构建和启动服务器：
+接口业务逻辑实现完成后，服务端需要启动 gRPC 服务来监听客户端请求。我们可以使用 `ServerBuilder` 来构建和启动服务器：
 
 ```java
     private static void runServer() throws IOException {
@@ -328,9 +339,9 @@ mvn clean compile
     }
 ```
 
-现在我们已经完成了 gRPC 服务的基本实现，那接下来让我们想一想“为什么要使用 gRPC 呢”：
+现在我们已经完成了 gRPC 服务的基本实现，运行以上方法便能实现客户端和服务端的交互。在这里我们着重介绍下 `Stub` 存根，它是 gRPC 中非常重要的一个概念。`Stub` 是 gRPC 客户端的代理对象，它封装了与服务端通信的所有细节。客户端通过 `Stub` 来调用远程服务的方法，就像调用本地方法一样简单，在上述例子中我们使用了 `newBlockingStub` 方法创建了阻塞似的 `Stub`，它会阻塞当前线程直到收到响应，此外还有 `newStub` 方法用于创建处理异步回调的 `Stub` 和 `newFutureStub` 方法用于创建支持 Future 的 `Stub`。
 
-在前文中我们已经了解到了 protobuf 协议的优点，像“体积小、解析快、平台语言无关和类型安全”等等，因为 gRPC 基于 protobuf 协议，所以它也继承了这些优点。除此之外，gRPC 基于 **HTTP/2 协议**，它相比于 HTTP/1.1 更加高效，感兴趣的同学可以简单参考下 [菜鸟教程 - HTTP/2 协议](https://www.runoob.com/http/http2-tutorial.html) 内容。因为 gRPC 的性能优势，它也就非常适合用于 **微服务架构中的服务间通信**。在官方文档中有如下图示：
+最后，让我们想一想“为什么要使用 gRPC 呢”？在前文中我们已经了解到了 protobuf 协议的优点，像“体积小、解析快、平台语言无关和类型安全”等等，因为 gRPC 基于 protobuf 协议，所以它也继承了这些优点。除此之外，gRPC 基于 **HTTP/2 协议**，它相比于 HTTP/1.1 更加高效，感兴趣的同学可以简单参考下 [菜鸟教程 - HTTP/2 协议](https://www.runoob.com/http/http2-tutorial.html) 内容。因为 gRPC 的性能优势，它也就非常适合用于 **微服务架构中的服务间通信**。在官方文档中有如下图示：
 
 ![](image.png)
 
@@ -338,5 +349,51 @@ mvn clean compile
 
 ### Nacos 对 gRPC 的使用
 
+接下来我们以 Nacos 源码为例，解析它在创建连接时是如何使用 gRPC 的。
 
+#### protobuf
+
+以下是 Nacos 中定义的 protobuf 文件：
+
+```protobuf
+syntax = "proto3";
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "com.alibaba.nacos.api.grpc.auto";
+
+message Metadata {
+  string type = 3;
+  string clientIp = 8;
+  map<string, string> headers = 7;
+}
+
+message Payload {
+  Metadata metadata = 2;
+  google.protobuf.Any body = 3;
+}
+
+service Request {
+  // Sends a commonRequest
+  rpc request (Payload) returns (Payload) {
+  }
+}
+
+service BiRequestStream {
+  // Sends a biStreamRequest
+  rpc requestBiStream (stream Payload) returns (stream Payload) {
+  }
+}
+```
+
+首先我们先看一下 `Metadata` 的定义，它是传递请求 `Payload` 的元数据，其中的三个字段的字段号并不是连续的；`Payload` 载荷消息是实际的传输对象，它除了包含 `Metadata` 外，还定义了 `google.protobuf.Any body` 请求体字段，`Any` 类型表示它可以包装任意类型的消息体。
+
+接下来我们分析下它的服务（service）定义：
+
+- `Request` 服务定义了一个 `request` 方法，它接收一个 `Payload` 类型的参数，返回一个 `Payload` 类型的结果，适用于简单的“请求-响应”场景。
+- `BiRequestStream` 服务定义了 `requestBiStream` 方法，它接收一个 `Payload` 类型的流参数，返回一个 `Payload` 类型的流结果，是 **双向流式RPC服务**，客户端可以同时发送多个请求，服务端也可以同时发送多个响应，支持全双工通信。
+
+#### 服务端
 
