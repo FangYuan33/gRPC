@@ -1,6 +1,532 @@
 ## 深入浅出 gRPC
 
-gRPC 是一个高性能、开源和通用的 RPC 框架，最初由 Google 开发。它使用 HTTP/2 协议作为传输层，并支持多种编程语言。gRPC 允许客户端和服务器之间进行高效的通信，特别适合微服务架构。在 gRPC 中，服务定义是通过 **Protocol Buffers（protobuf）** 来描述的。本篇文章以用 Java 编写 gRPC 接口为例，介绍 gRPC 相关的基本概念和使用方法：既可以简单地了解到 gRPC 的使用，也可以深入细节中熟悉更多相关的内容，代码示例参考 [grpc-java-example](https://github.com/FangYuan33/gRPC)。
+gRPC(general-purpose RPC framework) ，它是开源高性能、通用的 RPC 框架，基于 HTTP/2 协议，使用 Protocol Buffers 作为接口描述语言和消息序列化格式。本篇文章以用 Java 编写 gRPC 接口为例，介绍 gRPC 相关的基本概念和使用方法：既可以简单地了解到 gRPC 的使用，也可以深入细节中熟悉更多相关的内容，代码示例参考 [grpc-java-example](https://github.com/FangYuan33/gRPC)。
+
+> gRPC 最初由 Google 开发，大多数资料里会说 "g" 表示 "Google"，实际上它有 "g" 含义变化的小故事："g" 在最初确实代表 "Google"，后来随着 gRPC 开源并成为 CNCF（云原生计算基金会）的孵化项目，Google 有意淡化了品牌色彩，现在更多被理解为 "general-purpose RPC"，不再强调 Google 的部分，在官网的描述 "universal" 也更多体现它通用性的定位。
+
+接下来我们通过一个简单的小例子来介绍下 gRPC 的用法：
+
+### gRPC 怎么用？
+
+通常情况下大家在定义 RPC 接口时，通常会创建 Java Interface 来定义接口签名（京东内部采用 JSF 框架，类似于 Dubbo），之后调用方通过这个 Interface 找到对应的服务便能调用 RPC 接口。而在 gRPC 中，它需要定义 `.proto` 文件来声明接口，我们来看一个简单的小例子：
+
+```protobuf
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.grpc.helloworld";
+option java_outer_classname = "HelloWorldProto";
+option objc_class_prefix = "HLW";
+
+package com.grpc.helloworld;
+
+// 定义一个接口
+service Greeter {
+  // 接口中的方法
+  rpc SayHello (HelloRequest) returns (HelloReply) {}
+}
+
+// 请求入参
+message HelloRequest {
+  string name = 1;
+}
+
+// 请求出参
+message HelloReply {
+  string message = 1;
+}
+```
+
+在这个例子中，我们定义了一个名为 `Greeter` 的接口，它有一个名为 `SayHello` 的方法，该方法接受一个 `HelloRequest` 类型的参数，并返回一个 `HelloReply` 类型的响应。但是定义在 `.proto` 文件中的接口，并不能直接被调用，需要通过 gRPC 的代码生成工具来生成需要的语言的代码，这样才能供我们使用。那么该如何生成呢？
+
+其实很简单，它提供了一个 Maven 编译的插件 `protobuf-maven-plugin` 能将 protobuf 编译成 Java 代码，执行 `mvn compile` 即可：
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-netty-shaded</artifactId>
+        <version>1.75.0</version>
+        <scope>runtime</scope>
+    </dependency>
+    <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-protobuf</artifactId>
+        <version>1.75.0</version>
+    </dependency>
+    <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-stub</artifactId>
+        <version>1.75.0</version>
+    </dependency>
+</dependencies>
+
+<build>
+    <extensions>
+        <extension>
+            <groupId>kr.motd.maven</groupId>
+            <artifactId>os-maven-plugin</artifactId>
+            <version>1.7.1</version>
+        </extension>
+    </extensions>
+    <plugins>
+        <plugin>
+            <groupId>org.xolstice.maven.plugins</groupId>
+            <artifactId>protobuf-maven-plugin</artifactId>
+            <version>0.6.1</version>
+            <configuration>
+                <protocArtifact>com.google.protobuf:protoc:3.25.5:exe:${os.detected.classifier}</protocArtifact>
+                <pluginId>grpc-java</pluginId>
+                <pluginArtifact>io.grpc:protoc-gen-grpc-java:1.75.0:exe:${os.detected.classifier}</pluginArtifact>
+            </configuration>
+            <executions>
+                <execution>
+                    <goals>
+                        <goal>compile</goal>
+                        <goal>compile-custom</goal>
+                    </goals>
+                </execution>
+            </executions>
+        </plugin>
+    </plugins>
+</build>
+```
+
+经过编译后在 Output 输出路径下能看见它将接口定义编译成了类 `GreeterGrpc`，入参类型为 `HelloRequest`，出参类型为 `HelloReply`：
+
+![img.png](img.png)
+
+生成的这些类中都包含什么内容呢？首先让我们看看生成的入参类型 `HelloRequest`：
+
+```java
+public final class HelloRequest extends GeneratedMessageV3 implements HelloRequestOrBuilder {
+    // ...    
+
+    private volatile Object name_ = "";
+
+    private HelloRequest() {
+        this.name_ = "";
+    }
+
+    // 转换类型并获取字段值
+    public String getName() {
+        Object ref = this.name_;
+        if (ref instanceof String) {
+            return (String)ref;
+        } else {
+            ByteString bs = (ByteString)ref;
+            String s = bs.toStringUtf8();
+            this.name_ = s;
+            return s;
+        }
+    }
+}
+```
+
+在这个类中它生成了 `name_` 字段，与 `.proto` 文件中定义的 `name` 字段相对应，但类型为 Object，并不是 String，实际类型的转换操作会在 `getName` 方法中完成的。
+
+如果我们想创建 `HelloRequest` 对象并为 `name` 字段赋值该如何做呢？`HelloRequest` 并没有直接开放出来 `setName` 方法，构造方法也是私有的，那该如何完成对象的创建呢？
+
+实际上 gRPC 编译生成的类采用了 **建造者模式**，它会公开 `newBuilder` 方法来创建建造者，从它实现的接口 `HelloRequestOrBuilder` 命名中也能发现建造者模式的影子，它的这种接口名定义增加了代码的可读性，如下代码所示：
+
+```java
+public final class HelloRequest extends GeneratedMessageV3 implements HelloRequestOrBuilder {
+
+    // 饿汉式 单例模式
+    private static final HelloRequest DEFAULT_INSTANCE = new HelloRequest();
+
+    private HelloRequest() {
+        this.name_ = "";
+    }
+
+    // 1.默认实现
+    public static Builder newBuilder() {
+        return DEFAULT_INSTANCE.toBuilder();
+    }
+
+    // 2.
+    public Builder toBuilder() {
+        return this == DEFAULT_INSTANCE ? new Builder() : (new Builder()).mergeFrom(this);
+    }
+
+    private HelloRequest(GeneratedMessageV3.Builder<?> builder) {
+        super(builder);
+    }
+
+    public static final class Builder extends GeneratedMessageV3.Builder<Builder> implements HelloRequestOrBuilder {
+        private int bitField0_;
+        private Object name_ = "";
+
+        // 3.
+        private Builder() {
+        }
+
+        // 4. 为 name 字段赋值
+        public Builder setName(String value) {
+            if (value == null) {
+                throw new NullPointerException();
+            } else {
+                this.name_ = value;
+                // 位运算占位标记被修改，1 的二进制表示最低位为 1，所以位或运算会更将最低位置为 1
+                this.bitField0_ |= 1;
+                this.onChanged();
+                return this;
+            }
+        }
+
+        // 5. 生成对象实例
+        public HelloRequest build() {
+            HelloRequest result = this.buildPartial();
+            if (!result.isInitialized()) {
+                throw newUninitializedMessageException(result);
+            } else {
+                return result;
+            }
+        }
+    }
+}
+```
+
+其中 `DEFAULT_INSTANCE` 采用了 **饿汉式的单例模式**，提供了 `HelloRequest` 类型对象的默认空实现，这样便能减少空对象重复创建的开销，实现空对象的复用。
+
+在 `Builder` 类中可以发现 `setName` 方法能够为 `name` 字段赋值，在创建 `HelloRequest` 对象时需要这样：
+
+```java
+HelloRequest request = HelloRequest.newBuilder().setName("World").build();
+```
+
+现在我们回到 `setName` 方法中看一下其中的小细节：
+
+1. `setName` 更新字段值的方法不能为 null，否则会抛出异常，这一点比较简单，能在源码中一眼发现
+2. 标记 `Builder#bitField0_` 字段的最低位 1 为 1
+
+第二点值得我们深入了解一下，在 `setName` 方法中，通过位运算将 `Builder#bitField0_` 二进制的第 0 位（最低位）修改成了 1，修改成 1 后有什么作用呢？我们看看以下源码：
+
+```java
+public static final class Builder extends GeneratedMessageV3.Builder<Builder> implements HelloRequestOrBuilder {
+
+    public HelloRequest build() {
+        HelloRequest result = this.buildPartial();
+        if (!result.isInitialized()) {
+            throw newUninitializedMessageException(result);
+        } else {
+            return result;
+        }
+    }
+
+    public HelloRequest buildPartial() {
+        HelloRequest result = new HelloRequest(this);
+        // bitField0_ 不为 0 表示有字段被修改过
+        if (this.bitField0_ != 0) {
+            this.buildPartial0(result);
+        }
+
+        this.onBuilt();
+        return result;
+    }
+
+    private void buildPartial0(HelloRequest result) {
+        int from_bitField0_ = this.bitField0_;
+        // 通过位运算的占位信息判断哪些字段被修改，被修改的值才会被赋值
+        if ((from_bitField0_ & 1) != 0) {
+            result.name_ = this.name_;
+        }
+    }
+}
+```
+
+在 `buildPartial` 和 `buildPartial0` 方法中都能发现使用 `bitField0`_ 进行判断的逻辑，并且在构建对象时，**只有被修改的字段才会被赋值**，那么这样的好处是什么呢？一是 **能减少对象创建的开销**，二是在对象序列化时，未被赋值的字段不会被序列化，这样能减少序列化后的数据量。
+
+某个字段被赋值后，在清除它的值时，该如何修改 `Builder#bitField0_` 的值呢？`Builder` 中提供了 `clearName` 方法：
+
+```java
+public static final class Builder extends GeneratedMessageV3.Builder<Builder> implements HelloRequestOrBuilder {
+    public Builder clearName() {
+        // 获取空对象的默认字段值
+        this.name_ = HelloRequest.getDefaultInstance().getName();
+        // 位与运算将最低位置为 0
+        this.bitField0_ &= -2;
+        this.onChanged();
+        return this;
+    }
+}
+```
+
+可以发现它通过位与 -2，来将最低位置为 0。那么为什么是 -2 呢？因为 -2 的二进制表示为 `11111111111111111111111111111110`，这样位与计算后能保证其他位不变，只变更最低位，那么 -2 是怎么计算得来的呢？可以通过以下这个简单的公式进行计算：
+
+- `~(1 << n)`
+
+以清除第 0 位为例，想要获取 -2 的二进制表示，可以先获取 1 的二进制，然后取反（`~` 运算符），如下所示：
+
+```text
+~(1 << 0) 
+= ~1 
+= ~(00000000000000000000000000000001) 
+= 11111111111111111111111111111110 
+= -2
+```
+
+这样便得到了 -2 的二进制表示，然后通过位与运算，将最低位置为 0。所以，清除其他位的计算方式以此类推：
+
+```text
+清除第1位：~(1 << 1) = ~2 = -3
+清除第2位：~(1 << 2) = ~4 = -5
+```
+
+在对对象进行序列化时，会调用 `writeTo` 方法，但是在这个方法中并没有依赖 `Builder#bitField0_` 字段判断某字段是否需要被序列化，而且通过字段值非空判断的，序列化逻辑调用了 gRPC 库中的 `GeneratedMessageV3#isStringEmpty` 方法，就不再深入了，如下所示：
+
+```java
+public final class HelloRequest extends GeneratedMessageV3 implements HelloRequestOrBuilder {
+    // ...
+    
+    public void writeTo(CodedOutputStream output) throws IOException {
+        if (!GeneratedMessageV3.isStringEmpty(this.name_)) {
+            GeneratedMessageV3.writeString(output, 1, this.name_);
+        }
+
+        this.getUnknownFields().writeTo(output);
+    }
+}
+```
+
+以上就是 `HelloRequest` 中的重要内容，`HelloReply` 类型与 `HelloRequest` 类型中内容基本一致，所以不再赘述。接下来我们再看一下 `GreeterGrpc` 接口中的内容，它提供了多种获取 `Stub` 的方法： 
+
+```java
+public final class GreeterGrpc {
+
+    // 创建同步阻塞存根
+    public static GreeterBlockingStub newBlockingStub(Channel channel) {
+        AbstractStub.StubFactory<GreeterBlockingStub> factory = new AbstractStub.StubFactory<GreeterBlockingStub>() {
+            public GreeterBlockingStub newStub(Channel channel, CallOptions callOptions) {
+                return new GreeterBlockingStub(channel, callOptions);
+            }
+        };
+        return (GreeterBlockingStub)GreeterGrpc.GreeterBlockingStub.newStub(factory, channel);
+    }    
+
+    // 创建异步存根
+    public static GreeterStub newStub(Channel channel) {
+        AbstractStub.StubFactory<GreeterStub> factory = new AbstractStub.StubFactory<GreeterStub>() {
+            public GreeterStub newStub(Channel channel, CallOptions callOptions) {
+                return new GreeterStub(channel, callOptions);
+            }
+        };
+        return (GreeterStub)GreeterGrpc.GreeterStub.newStub(factory, channel);
+    }
+
+    // 创建异步 Future 存根
+    public static GreeterFutureStub newFutureStub(Channel channel) {
+        AbstractStub.StubFactory<GreeterFutureStub> factory = new AbstractStub.StubFactory<GreeterFutureStub>() {
+            public GreeterFutureStub newStub(Channel channel, CallOptions callOptions) {
+                return new GreeterFutureStub(channel, callOptions);
+            }
+        };
+        return (GreeterFutureStub)GreeterGrpc.GreeterFutureStub.newStub(factory, channel);
+    }
+    
+    //...
+}
+```
+
+`Stub` 是 gRPC 客户端的代理对象，它封装了与服务端通信的所有细节。客户端通过 `Stub` 来调用远程服务的方法，就像调用本地方法一样简单（RPC 的体现），这几个方法的入参都是 `Channel` 对象，那么该如何理解 `Channel` 呢？在 gRPC 中，`Channel` 是客户端与服务端之间的 **通信通道**，它代表到特定服务器地址的连接，是 gRPC 客户端的 **网络通信抽象层**，它将复杂的网络连接管理、协议处理和传输细节封装起来，为 `Stub` 提供简洁的通信接口，是实现高效、可靠 RPC 通信的基础设施。在创建 `Channel` 对象时，gRPC 同样地也采用了 **建造者模式**，提供的建造者实现为 `ManagedChannelBuilder`，创建一个 `Channel` 对象的示例如下：
+
+```java
+ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", 9090).usePlaintext().build();
+```
+
+`ManagedChannelBuilder#forAddress` 方法会绑定具体的 IP 和端口：
+
+```java
+public abstract class ManagedChannelBuilder<T extends ManagedChannelBuilder<T>> {
+
+    public static ManagedChannelBuilder<?> forAddress(String name, int port) {
+      // provider 方法获取 Channel 实现类
+      return ManagedChannelProvider.provider().builderForAddress(name, port);
+    }
+}
+```
+
+执行 `ManagedChannelProvider#provider` 方法会获取实际的 Channel 实现类，我们看一下它的实现：
+
+```java
+public abstract class ManagedChannelProvider {
+
+  public static ManagedChannelProvider provider() {
+    ManagedChannelProvider provider = ManagedChannelRegistry.getDefaultRegistry().provider();
+    if (provider == null) {
+      throw new ProviderNotFoundException("No functional channel service provider found. "
+          + "Try adding a dependency on the grpc-okhttp, grpc-netty, or grpc-netty-shaded "
+          + "artifact");
+    }
+    return provider;
+  }
+}
+```
+
+在获取 `ManagedChannelProvider` 的实现类时有一段异常提示信息（没有找到 `Channel` 的提供者，请添加 `grpc-okhttp` 或 `grpc-netty` 或 `grpc-netty-shaded` 的依赖）：
+> No functional channel service provider found. Try adding a dependency on the grpc-okhttp, grpc-netty, or grpc-netty-shaded artifact
+
+根据这段信息能猜得到：它的 `Channel` 实现类并没有在 grpc-core 的核心依赖包中，而是需要通过额外的上述三种依赖的其一来引入具体的实现，这种设计采用了 **面向接口编程** 和 **松耦合的设计**，在运行时能动态加载需要的实现类（这也与前文中依赖 `grpc-netty-shaded` 呼应）。
+
+接下来我们顺着它的源码，看看它到底是如何发现具体的实现类的？因为源码执行步骤较多，我们只看最终逻辑。最终会发现它执行了 `ServiceLoader#load` 方法，它会去找 `io.grpc.ManagedChannelProvider` 类型的实现类：
+
+```java
+final class ServiceProviders {
+
+  // 入参 klass: io.grpc.ManagedChannelProvider
+  public static <T> Iterable<T> getCandidatesViaServiceLoader(Class<T> klass, ClassLoader cl) {
+    // SPI 服务发现
+    Iterable<T> i = ServiceLoader.load(klass, cl);
+    if (!i.iterator().hasNext()) {
+      i = ServiceLoader.load(klass);
+    }
+    return i;
+  }
+}
+```
+
+而 `ServiceLoader` 是 Java 提供的 **服务发现和加载机制**（java.util 包下），可以在运行时动态发现和加载接口实现类，也叫 **Java SPI (Service Provider Interface)**。比如依赖 `grpc-netty-shaded` 依赖包，可以发现在 `META-INF/services/io.grpc.ManagedChannelProvider` 目录下它定义了两个不同的实现类：
+
+![img_1.png](img_1.png)
+
+gRPC 在加载到这两个实现类之后，选择了第一个（get(0)），源码如下：
+
+```java
+public abstract class ManagedChannelProvider {
+    // 获取 provider 的第一个实现类
+    ManagedChannelProvider provider() {
+        List<ManagedChannelProvider> providers = providers();
+        return providers.isEmpty() ? null : providers.get(0);
+    }
+}
+```
+
+因为 SPI 并不是本次分享主要介绍的内容，但是方便大家理解，在这里也把它比较重要的部分介绍一下。在上边的逻辑中，可以发现执行了 `ServiceLoader#load` 方法来加载具体的实现类，但是实际上它并不会立即去执行加载，而是采用了 **懒加载机制**。它实现了 `Iterable` 接口，当发生遍历操作时触发加载，`ServiceLoader` 中有 `LazyClassPathLookupIterator` 的实现，当执行到 `hasNext` 方法时，会触发实际的加载操作：
+
+```java
+public final class ServiceLoader<S> implements Iterable<S> {
+    // ...
+    
+    private final class LazyClassPathLookupIterator<T> implements Iterator<Provider<T>> {
+
+        static final String PREFIX = "META-INF/services/";
+        
+        // 执行入口
+        @Override
+        public boolean hasNext() {
+            if (acc == null) {
+                return hasNextService();
+            } else {
+                PrivilegedAction<Boolean> action = new PrivilegedAction<>() {
+                    public Boolean run() { return hasNextService(); }
+                };
+                return AccessController.doPrivileged(action, acc);
+            }
+        }
+
+        // 判断是否有下一个要被发现的服务
+        private boolean hasNextService() {
+            while (nextProvider == null && nextError == null) {
+                try {
+                    // 触发加载的动作
+                    Class<?> clazz = nextProviderClass();
+                    if (clazz == null)
+                        return false;
+
+                    if (clazz.getModule().isNamed()) {
+                        // ignore class if in named module
+                        continue;
+                    }
+
+                    if (service.isAssignableFrom(clazz)) {
+                        Class<? extends S> type = (Class<? extends S>) clazz;
+                        Constructor<? extends S> ctor
+                                = (Constructor<? extends S>)getConstructor(clazz);
+                        ProviderImpl<S> p = new ProviderImpl<S>(service, type, ctor, acc);
+                        nextProvider = (ProviderImpl<T>) p;
+                    } else {
+                        fail(service, clazz.getName() + " not a subtype");
+                    }
+                } catch (ServiceConfigurationError e) {
+                    nextError = e;
+                }
+            }
+            return true;
+        }
+
+
+        private Class<?> nextProviderClass() {
+            if (configs == null) {
+                try {
+                    // 拼接路径，约定大于配置，定义所有的服务发现都需要在 META-INF/services/ 目录下
+                    String fullName = PREFIX + service.getName();
+                    // 触发加载操作
+                    if (loader == null) {
+                        configs = ClassLoader.getSystemResources(fullName);
+                    } else if (loader == ClassLoaders.platformClassLoader()) {
+                        // The platform classloader doesn't have a class path,
+                        // but the boot loader might.
+                        if (BootLoader.hasClassPath()) {
+                            configs = BootLoader.findResources(fullName);
+                        } else {
+                            configs = Collections.emptyEnumeration();
+                        }
+                    } else {
+                        configs = loader.getResources(fullName);
+                    }
+                } catch (IOException x) {
+                    fail(service, "Error locating configuration files", x);
+                }
+            }
+            // 处理结果并返回
+            while ((pending == null) || !pending.hasNext()) {
+                if (!configs.hasMoreElements()) {
+                    return null;
+                }
+                pending = parse(configs.nextElement());
+            }
+            String cn = pending.next();
+            try {
+                return Class.forName(cn, false, loader);
+            } catch (ClassNotFoundException x) {
+                fail(service, "Provider " + cn + " not found");
+                return null;
+            }
+        }
+    }
+}
+```
+
+在 IDEA 中添加断点查看会更直观：
+
+![img_2.png](img_2.png)
+
+现在有了 `Channel` 对象，接下来就可以通过它来创建 `Stub` 对象了，那么创建 `Stub` 对象的逻辑有什么值得关注的吗？以创建阻塞的 `GreeterBlockingStub` 为例：
+
+```java
+public final class GreeterGrpc {
+    public static GreeterBlockingStub newBlockingStub(Channel channel) {
+        // 工厂方法模式
+        AbstractStub.StubFactory<GreeterBlockingStub> factory = new AbstractStub.StubFactory<GreeterBlockingStub>() {
+            // 最终会执行到 newStub 方法
+            public GreeterBlockingStub newStub(Channel channel, CallOptions callOptions) {
+                return new GreeterBlockingStub(channel, callOptions);
+            }
+        };
+        return (GreeterBlockingStub)GreeterGrpc.GreeterBlockingStub.newStub(factory, channel);
+    }
+}
+
+// 封装 Channel 对象
+public abstract class AbstractStub<S extends AbstractStub<S>> {
+    protected AbstractStub(Channel channel, CallOptions callOptions) {
+        this.channel = checkNotNull(channel, "channel");
+        this.callOptions = checkNotNull(callOptions, "callOptions");
+    }
+}
+```
+
+在创建 `GreeterBlockingStub` 对象时，采用了 **工厂方法模式**，最终会执行 `AbstractStub` 的构造方法，将重要的 `Channel` 对象封装起来，其他此处就没有值得关注的内容了。
 
 ### protobuf 定义
 
