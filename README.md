@@ -528,42 +528,11 @@ public abstract class AbstractStub<S extends AbstractStub<S>> {
 
 在创建 `GreeterBlockingStub` 对象时，采用了 **工厂方法模式**，最终会执行 `AbstractStub` 的构造方法，将重要的 `Channel` 对象封装起来，其他此处就没有值得关注的内容了。
 
-### protobuf 定义
+除了定义上述简单的 `.proto` 文件，我们还可以定义复杂的 `proto` 文件，在接下来的“protobuf 定义”小节中会介绍一些定义 protobuf 的语法和注意事项，大家选择性地阅读。
 
-protobuf 是一种语言无关、平台无关、可扩展的结构化数据序列化机制，它类似于 JSON 或 XML，但更高效、更紧凑。protobuf 通过定义服务和消息类型，gRPC 可以自动生成客户端和服务器端的代码。以下是一个简单的 protobuf 定义示例：
+#### protobuf 定义
 
-```protobuf
-syntax = "proto3";
-
-// 为每个消息类型生成单独的 Java 文件，而不是把所有类放在一个外部类中
-option java_multiple_files = true;
-// 执行包路径
-option java_package = "com.grpc.helloworld";
-option java_outer_classname = "HelloWorldProto";
-option objc_class_prefix = "HLW";
-
-package com.grpc.helloworld;
-
-// The greeting service definition.
-service Greeter {
-  // Sends a greeting
-  rpc SayHello (HelloRequest) returns (HelloReply) {}
-}
-
-// The request message containing the user's name.
-message HelloRequest {
-  string name = 1;
-}
-
-// The response message containing the greetings
-message HelloReply {
-  string message = 1;
-}
-```
-
-根据以上 protobuf 定义，我们可以看到一个简单的 gRPC 服务 `Greeter`，它包含一个方法 `SayHello`，该方法接受一个 `HelloRequest` 消息并返回一个 `HelloReply` 消息。`HelloRequest` 包含一个字符串字段 `name`，而 `HelloReply` 包含一个字符串字段 `message`。
-
-当然，protobuf 还支持定义更复杂的类型和服务，包括流式 RPC、嵌套消息、枚举等，如下所示：
+protobuf 是一种语言无关、平台无关、可扩展的结构化数据序列化机制，它类似于 JSON 或 XML，但更高效、更紧凑。protobuf 通过定义服务和消息类型，gRPC 可以自动生成客户端和服务器端的代码，它除了支持上文中简单的一元调用接口定义外，还支持定义更复杂的类型和服务，包括流式 RPC、嵌套消息、枚举等，如下所示：
 
 1. **枚举类型 (Enum)**
 
@@ -734,49 +703,9 @@ message User {
 
 > `reserved` 关键字用于保留编号或字段名，禁止重用，确保向后兼容性。
 
-### 编译 protobuf
+更多内容可参考 [Protocol Buffers 文档](https://protobuf.com.cn/getting-started/javatutorial/#protocol-format)。
 
-第一小节中简单的 protobuf 定义保存为 `helloworld.proto` 文件，并保存在 `src/main/proto` 目录下，借助 Maven 的 `protobuf-maven-plugin` 插件，我们可以自动编译 protobuf 文件为 Java 代码：
-
-```xml
-<build>
-    <extensions>
-        <extension>
-            <groupId>kr.motd.maven</groupId>
-            <artifactId>os-maven-plugin</artifactId>
-            <version>1.7.1</version>
-        </extension>
-    </extensions>
-    <plugins>
-        <plugin>
-            <groupId>org.xolstice.maven.plugins</groupId>
-            <artifactId>protobuf-maven-plugin</artifactId>
-            <version>0.6.1</version>
-            <configuration>
-                <protocArtifact>com.google.protobuf:protoc:3.25.5:exe:${os.detected.classifier}</protocArtifact>
-                <pluginId>grpc-java</pluginId>
-                <pluginArtifact>io.grpc:protoc-gen-grpc-java:1.74.0:exe:${os.detected.classifier}</pluginArtifact>
-            </configuration>
-            <executions>
-                <execution>
-                    <goals>
-                        <goal>compile</goal>
-                        <goal>compile-custom</goal>
-                    </goals>
-                </execution>
-            </executions>
-        </plugin>
-    </plugins>
-</build>
-```
-
-在 `pom.xml` 中添加以上配置后，运行以下命令即可编译 protobuf 文件：
-
-```bash
-mvn clean compile
-```
-
-编译完成后可以在 `target/generated-sources/protobuf/java` 目录下找到生成的 Java 代码 `com/grpc/helloworld/GreeterGrpc.java`。
+---
 
 ### 搭建 gRPC 服务端和客户端
 
@@ -922,4 +851,11 @@ service BiRequestStream {
 - `BiRequestStream` 服务定义了 `requestBiStream` 方法，它接收一个 `Payload` 类型的流参数，返回一个 `Payload` 类型的流结果，是 **双向流式RPC服务**，客户端可以同时发送多个请求，服务端也可以同时发送多个响应，支持全双工通信。
 
 #### 服务端
+
+---
+
+### 巨人的肩膀
+
+- [Github - grpc](https://github.com/grpc)
+- [Protocol Buffers 文档](https://protobuf.com.cn/getting-started/javatutorial/#protocol-format)
 
