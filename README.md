@@ -328,7 +328,30 @@ public final class GreeterGrpc {
 }
 ```
 
-`Stub` 是 gRPC 客户端的代理对象，它封装了与服务端通信的所有细节。客户端通过 `Stub` 来调用远程服务的方法，就像调用本地方法一样简单（RPC 的体现），这几个方法的入参都是 `Channel` 对象，那么该如何理解 `Channel` 呢？在 gRPC 中，`Channel` 是客户端与服务端之间的 **通信通道**，它代表到特定服务器地址的连接，是 gRPC 客户端的 **网络通信抽象层**，它将复杂的网络连接管理、协议处理和传输细节封装起来，为 `Stub` 提供简洁的通信接口，是实现高效、可靠 RPC 通信的基础设施。在创建 `Channel` 对象时，gRPC 同样地也采用了 **建造者模式**，提供的建造者实现为 `ManagedChannelBuilder`，创建一个 `Channel` 对象的示例如下：
+那么 `Stub` 又是什么呢？我们拿其中的 `GreeterBlockingStub` 为例，看看它的实现：
+
+```java
+public final class GreeterGrpc {
+    // 阻塞调用存根
+    public static final class GreeterBlockingStub extends AbstractBlockingStub<GreeterBlockingStub> {
+        private GreeterBlockingStub(Channel channel, CallOptions callOptions) {
+            super(channel, callOptions);
+        }
+
+        protected GreeterBlockingStub build(Channel channel, CallOptions callOptions) {
+            return new GreeterBlockingStub(channel, callOptions);
+        }
+
+        public HelloReply sayHello(HelloRequest request) {
+            return (HelloReply)ClientCalls.blockingUnaryCall(this.getChannel(), GreeterGrpc.getSayHelloMethod(), this.getCallOptions(), request);
+        }
+    }
+}
+```
+
+在 `GreeterBlockingStub` 中会编译生成 `sayHello` 方法，与 `.proto` 文件中定义的方法签名一致，之后客户端便可以通过调用 `GreeterBlockingStub#sayHello` 方法来实现 RPC 调用，非常简单，具体通讯逻辑是借助 `grpc-stub` 包下 `ClientCalls#blockingUnaryCall` 方法完成的，所以实际上 `Stub` 是 gRPC 客户端的代理对象，它将服务端通信的所有细节封装起来，让客户端实现开箱即用。
+
+在创建 `Stub` 的方法中，入参都是 `Channel` 对象，那么该如何理解 `Channel` 呢？在 gRPC 中，`Channel` 是客户端与服务端之间的 **通信通道**，它代表到特定服务器地址的连接，是 gRPC 客户端的 **网络通信抽象层**，它将复杂的网络连接管理、协议处理和传输细节封装起来，为 `Stub` 提供简洁的通信接口，是实现高效、可靠 RPC 通信的基础设施。在创建 `Channel` 对象时，gRPC 同样地也采用了 **建造者模式**，提供的建造者实现为 `ManagedChannelBuilder`，创建一个 `Channel` 对象的示例如下：
 
 ```java
 ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", 9090).usePlaintext().build();
@@ -393,9 +416,10 @@ gRPC 在加载到这两个实现类之后，选择了第一个（get(0)），源
 
 ```java
 public abstract class ManagedChannelProvider {
-    // 获取 provider 的第一个实现类
+    
     ManagedChannelProvider provider() {
         List<ManagedChannelProvider> providers = providers();
+        // 获取 provider 的第一个实现类
         return providers.isEmpty() ? null : providers.get(0);
     }
 }
@@ -519,6 +543,10 @@ public final class GreeterGrpc {
 
 // 封装 Channel 对象
 public abstract class AbstractStub<S extends AbstractStub<S>> {
+    
+    private final Channel channel;
+    private final CallOptions callOptions;
+    
     protected AbstractStub(Channel channel, CallOptions callOptions) {
         this.channel = checkNotNull(channel, "channel");
         this.callOptions = checkNotNull(callOptions, "callOptions");
@@ -526,11 +554,153 @@ public abstract class AbstractStub<S extends AbstractStub<S>> {
 }
 ```
 
-在创建 `GreeterBlockingStub` 对象时，采用了 **工厂方法模式**，最终会执行 `AbstractStub` 的构造方法，将重要的 `Channel` 对象封装起来，其他此处就没有值得关注的内容了。
+在创建 `GreeterBlockingStub` 对象时，采用了 **工厂方法模式**，最终会执行 `AbstractStub` 的构造方法，将重要的 `Channel` 对象封装起来。以上关于 gRPC 客户端需要了解的内容就差不多了，现在我们来使用 Java 代码来实现一个简单的 Hello World 客户端：
+
+```java
+/**
+ * gRPC Hello World 客户端
+ */
+public class HelloWorldClient {
+
+    public static void main(String[] args) {
+        // 创建 gRPC 通道
+        ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", 50051)
+                .usePlaintext()
+                .build();
+
+        // 创建客户端存根
+        GreeterGrpc.GreeterBlockingStub stub = GreeterGrpc.newBlockingStub(channel);
+        // 创建异步客户端存根
+        // GreeterGrpc.GreeterStub stub = GreeterGrpc.newStub(channel);
+        // 创建支持 Future 的异步客户端存根
+        // GreeterGrpc.GreeterStub stub = GreeterGrpc.newFutureStub(channel);
+
+        // 创建请求
+        HelloRequest request = HelloRequest.newBuilder()
+                .setName("World")
+                .build();
+
+        // 调用服务
+        HelloReply response = stub.sayHello(request);
+
+        // 输出响应
+        System.out.println("收到响应: " + response.getMessage());
+
+        // 关闭通道
+        channel.shutdown();
+    }
+}
+```
+
+客户端调用接口，服务端收到请求后处理并返回响应，那么服务端该如何提供接口服务呢？这就需要我们再看一下 `GreeterGrpc`，在 `GreeterGrpc` 中定义了 `GreeterImplBase` 类，该类实现了 `AsyncService` 接口，在 `AsyncService` 接口中提供了 `sayHello` 方法的默认实现（default），如下所示：
+
+```java
+public final class GreeterGrpc {
+    
+    public interface AsyncService {
+        // .proto 文件中定义的接口
+        default void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+            ServerCalls.asyncUnimplementedUnaryCall(GreeterGrpc.getSayHelloMethod(), responseObserver);
+        }
+    }
+
+    public abstract static class GreeterImplBase implements BindableService, AsyncService {
+        public final ServerServiceDefinition bindService() {
+            return GreeterGrpc.bindService(this);
+        }
+    }
+}
+```
+
+这样，我们只需要继承 `GreeterImplBase` 类，并重写 `sayHello` 方法即可，如下所示：
+
+```java
+    private static class GreeterImpl extends GreeterGrpc.GreeterImplBase {
+        @Override
+        public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+            try {
+                String name = request.getName();
+                logger.info("收到问候请求，姓名: " + name);
+
+                // 创建响应
+                HelloReply reply = HelloReply.newBuilder()
+                        .setMessage("Hello, " + name + "!")
+                        .build();
+
+                // 发送一条响应
+                responseObserver.onNext(reply);
+                // 完成响应
+                responseObserver.onCompleted();
+
+                logger.info("已发送问候响应: " + reply.getMessage());
+            } catch (Exception e) {
+                // 发送异常响应
+                responseObserver.onError(Status.INTERNAL
+                        .withDescription("服务器内部错误")
+                        .withCause(e)
+                        .asRuntimeException());
+            }
+        }
+    }
+```
+
+单纯的实现接口逻辑还不够，还需要将启动 gRPC 服务并将该接口注册上去，这样客户端才能调用接口，那么该如何做呢？gRPC 同样给我们提供了采用 **建造者模式** 的方法来创建并启动 gRPC 服务：
+
+```java
+public class HelloWorldServer {
+    private void start() throws IOException {
+        /* 监听端口为 50051 */
+        int port = 50051;
+        Server server = ServerBuilder.forPort(port)
+                // 注册接口
+                .addService(new GreeterImpl())
+                .build()
+                .start();
+
+        logger.info("服务器已启动，监听端口: " + port);
+    }
+}
+```
+
+其中 `ServerBuilder#addService` 方法的入参为 `BindableService` 接口：
+
+```java
+public abstract class ServerBuilder<T extends ServerBuilder<T>> {
+    public abstract T addService(BindableService bindableService);    
+}
+```
+
+这也就是生成的 `GreeterImplBase` 也实现 `BindableService` 接口的原因。服务端成功启动后，客户端再调用接口便能完成通讯了：
+
+```text
+服务端：
+信息: 服务器已启动，监听端口: 50051
+信息: 收到问候请求，姓名: World
+信息: 已发送问候响应: Hello, World!
+信息: 收到问候请求，姓名: World
+信息: 已发送问候响应: Hello, World!
+
+客户端：
+收到响应: Hello, World!
+收到响应: Hello, World!
+```
+
+---
+
+### 使用 gRPC 的优势是什么？
+
+在上文中，我们大概知道了什么是 gRPC 以及 gRPC 的基本用法，那么使用它有什么好处呢？相对直观的好处是 gRPC 将通讯的内部细节全部封装了起来，开发只需要关注业务细节，实现了 **开箱即用**。并且 gRPC 相关的类由 `.proto` 文件编译生成，所以它也就具备了 ProtoBuf 协议的特点：
+
+1. **跨语言**：`.proto` 文件不仅仅能编译成 Java 语言，还能被编译成 go, c++, node 和 php 等多种语言，可以轻易的实现跨语言通讯
+2. Protobuf 的序列化机制具有 **体积小、解析快** 的特点，所以性能也更好，相比于 JSON 序列化后的结果通常要小 20%-50%，而且 ProtoBuf 协议下定义的每个字段在类中都有固定的类型和存储位置，编译器已经知道字段的类型、顺序信息，运行时不需要再通过反射或动态类型判断类型，解析更快
+
+此外，gRPC 基于 HTTP/2.0 协议，那么它也就具备了这个协议的特点，包括多路复用、头部压缩等，这也让它 **性能比较高**，适用于分布式服务间的内部通讯，并且还支持 **双向流通讯**，这样在 **实时通讯** 的场景也可以使用 gRPC。
+
+--- 
 
 除了定义上述简单的 `.proto` 文件，我们还可以定义复杂的 `proto` 文件，在接下来的“protobuf 定义”小节中会介绍一些定义 protobuf 的语法和注意事项，大家选择性地阅读。
 
-#### protobuf 定义
+### protobuf 定义
 
 protobuf 是一种语言无关、平台无关、可扩展的结构化数据序列化机制，它类似于 JSON 或 XML，但更高效、更紧凑。protobuf 通过定义服务和消息类型，gRPC 可以自动生成客户端和服务器端的代码，它除了支持上文中简单的一元调用接口定义外，还支持定义更复杂的类型和服务，包括流式 RPC、嵌套消息、枚举等，如下所示：
 
@@ -704,153 +874,6 @@ message User {
 > `reserved` 关键字用于保留编号或字段名，禁止重用，确保向后兼容性。
 
 更多内容可参考 [Protocol Buffers 文档](https://protobuf.com.cn/getting-started/javatutorial/#protocol-format)。
-
----
-
-### 搭建 gRPC 服务端和客户端
-
-在 `GreeterGrpc` 类中可以找到 `com.grpc.helloworld.GreeterGrpc.GreeterImplBase` 类，它是 `Greeter` 服务的实现基类，包含了 `SayHello` 方法的定义，我们可以继承这个类来实现具体的业务逻辑：
-
-```java
-    private static class GreeterImpl extends GreeterGrpc.GreeterImplBase {
-        @Override
-        public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
-            try {
-                String name = request.getName();
-                logger.info("收到问候请求，姓名: " + name);
-
-                // 创建响应
-                HelloReply reply = HelloReply.newBuilder()
-                        .setMessage("Hello, " + name + "!")
-                        .build();
-
-                // 发送一条响应
-                responseObserver.onNext(reply);
-                // 完成响应
-                responseObserver.onCompleted();
-
-                logger.info("已发送问候响应: " + reply.getMessage());
-            } catch (Exception e) {
-                // 发送异常响应
-                responseObserver.onError(Status.INTERNAL
-                        .withDescription("服务器内部错误")
-                        .withCause(e)
-                        .asRuntimeException());
-            }
-        }
-    }
-```
-
-接口业务逻辑实现完成后，服务端需要启动 gRPC 服务来监听客户端请求。我们可以使用 `ServerBuilder` 来构建和启动服务器：
-
-```java
-    private static void runServer() throws IOException {
-        // 创建 gRPC 服务器
-        Server server = ServerBuilder.forPort(50051)
-                // 添加服务实现
-                .addService(new GreeterImpl()) 
-                .build()
-                .start();
-
-        logger.info("gRPC 服务器已启动，监听端口: " + server.getPort());
-
-        // 添加钩子以优雅关闭服务器
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            logger.info("正在关闭 gRPC 服务器...");
-            server.shutdown();
-            logger.info("gRPC 服务器已关闭");
-        }));
-
-        // 阻塞等待服务器关闭
-        server.awaitTermination();
-    }
-```
-
-这样服务端启动完成后，客户端就可以调用这个服务了。客户端调用这个服务的逻辑更加简单，我们可以使用 `GreeterGrpc.newBlockingStub(channel)` 创建一个阻塞式的客户端存根（stub），然后调用 `sayHello` 方法：
-
-```java
-    private static void runClient() {
-        // 创建 gRPC 通道
-        ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", 50051)
-                .usePlaintext()
-                .build();
-
-        // 创建客户端存根
-        GreeterGrpc.GreeterBlockingStub stub = GreeterGrpc.newBlockingStub(channel);
-
-        // 创建请求
-        HelloRequest request = HelloRequest.newBuilder()
-                .setName("World")
-                .build();
-
-        // 调用服务
-        HelloReply response = stub.sayHello(request);
-
-        // 输出响应
-        System.out.println("收到响应: " + response.getMessage());
-
-        // 关闭通道
-        channel.shutdown();
-    }
-```
-
-现在我们已经完成了 gRPC 服务的基本实现，运行以上方法便能实现客户端和服务端的交互。在这里我们着重介绍下 `Stub` 存根，它是 gRPC 中非常重要的一个概念。`Stub` 是 gRPC 客户端的代理对象，它封装了与服务端通信的所有细节。客户端通过 `Stub` 来调用远程服务的方法，就像调用本地方法一样简单，在上述例子中我们使用了 `newBlockingStub` 方法创建了阻塞似的 `Stub`，它会阻塞当前线程直到收到响应，此外还有 `newStub` 方法用于创建处理异步回调的 `Stub` 和 `newFutureStub` 方法用于创建支持 Future 的 `Stub`。
-
-最后，让我们想一想“为什么要使用 gRPC 呢”？在前文中我们已经了解到了 protobuf 协议的优点，像“体积小、解析快、平台语言无关和类型安全”等等，因为 gRPC 基于 protobuf 协议，所以它也继承了这些优点。除此之外，gRPC 基于 **HTTP/2 协议**，它相比于 HTTP/1.1 更加高效，感兴趣的同学可以简单参考下 [菜鸟教程 - HTTP/2 协议](https://www.runoob.com/http/http2-tutorial.html) 内容。因为 gRPC 的性能优势，它也就非常适合用于 **微服务架构中的服务间通信**。在官方文档中有如下图示：
-
-![](image.png)
-
-如果团队中基于不同的编程语言开发微服务，那么 gRPC 跨语言调用的特点也能派上用场了。
-
-### Nacos 对 gRPC 的使用
-
-接下来我们以 Nacos 源码为例，解析它在创建连接时是如何使用 gRPC 的。
-
-#### protobuf
-
-以下是 Nacos 中定义的 protobuf 文件：
-
-```protobuf
-syntax = "proto3";
-
-import "google/protobuf/any.proto";
-import "google/protobuf/timestamp.proto";
-
-option java_multiple_files = true;
-option java_package = "com.alibaba.nacos.api.grpc.auto";
-
-message Metadata {
-  string type = 3;
-  string clientIp = 8;
-  map<string, string> headers = 7;
-}
-
-message Payload {
-  Metadata metadata = 2;
-  google.protobuf.Any body = 3;
-}
-
-service Request {
-  // Sends a commonRequest
-  rpc request (Payload) returns (Payload) {
-  }
-}
-
-service BiRequestStream {
-  // Sends a biStreamRequest
-  rpc requestBiStream (stream Payload) returns (stream Payload) {
-  }
-}
-```
-
-首先我们先看一下 `Metadata` 的定义，它是传递请求 `Payload` 的元数据，其中的三个字段的字段号并不是连续的；`Payload` 载荷消息是实际的传输对象，它除了包含 `Metadata` 外，还定义了 `google.protobuf.Any body` 请求体字段，`Any` 类型表示它可以包装任意类型的消息体。
-
-接下来我们分析下它的服务（service）定义：
-
-- `Request` 服务定义了一个 `request` 方法，它接收一个 `Payload` 类型的参数，返回一个 `Payload` 类型的结果，适用于简单的“请求-响应”场景。
-- `BiRequestStream` 服务定义了 `requestBiStream` 方法，它接收一个 `Payload` 类型的流参数，返回一个 `Payload` 类型的流结果，是 **双向流式RPC服务**，客户端可以同时发送多个请求，服务端也可以同时发送多个响应，支持全双工通信。
-
-#### 服务端
 
 ---
 

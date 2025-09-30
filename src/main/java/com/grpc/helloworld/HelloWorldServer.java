@@ -18,6 +18,15 @@ public class HelloWorldServer {
     private Server server;
 
     /**
+     * 主方法：启动服务器
+     */
+    public static void main(String[] args) throws IOException, InterruptedException {
+        final HelloWorldServer server = new HelloWorldServer();
+        server.start();
+        server.blockUntilShutdown();
+    }
+
+    /**
      * 启动服务器
      */
     private void start() throws IOException {
@@ -88,12 +97,4 @@ public class HelloWorldServer {
         }
     }
 
-    /**
-     * 主方法：启动服务器
-     */
-    public static void main(String[] args) throws IOException, InterruptedException {
-        final HelloWorldServer server = new HelloWorldServer();
-        server.start();
-        server.blockUntilShutdown();
-    }
 }
